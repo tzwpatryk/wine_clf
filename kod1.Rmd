@@ -1,0 +1,56 @@
+Wczytanie przygotowanego pakietu funkcji
+```{r}
+source("functions/utils.R")
+```
+
+```{r}
+wine <- load_wine_data("data/winequality-red.csv", sep = ",")
+```
+
+Szybka inspekcja
+```{r}
+inspect_data(wine)
+```
+Zliczenie braków
+```{r}
+na_counts <- count_na(wine)
+cat("Braki w kolumnach:\n")
+print(na_counts)
+```
+Podział na zbiory treningowy i testowy (75% / 25%)
+```{r}
+splits <- train_test_split(wine, prop = 0.75, seed = 42)
+train_df <- splits$train
+test_df  <- splits$test
+
+print_split_sizes(splits)
+
+```
+
+```{r}
+# Zdefiniowanie kolumny celu
+feature_cols <- setdiff(names(train_df), "quality")
+
+# Skalowanie cech na zbiorze treningowym (standardyzacja)
+res_train_scale <- scale_numeric(train_df, columns = feature_cols, method = "standard")
+train_scaled <- res_train_scale$df_scaled
+scale_params <- res_train_scale$params
+
+# Zastosowanie tych samych parametrów skalowania do zbioru testowego
+test_scaled <- apply_scaling(test_df, params = scale_params, method = "standard")
+```
+
+
+```{r}
+# 1. Statystyki opisowe
+summary(train_df)
+
+# 2. Histogramy wszystkich cech
+plot_histograms(train_df, feature_cols, ncol = 2, mar = c(3, 3, 2, 1), oma = c(1, 1, 1, 1))
+
+# 3. Macierz korelacji + heatmapa
+corr_mat <- cor(train_df[, feature_cols])
+heatmap(corr_mat, symm = TRUE, main = "Macierz korelacji cech")
+
+```
+
