@@ -1,8 +1,4 @@
 # Wczytywanie danych
-# filepath: ścieżka do pliku CSV
-# sep: separator pól (domyślnie ";")
-# dec: znak dziesiętny (domyślnie ".")
-# Zwraca data.frame z wczytanymi danymi.
 load_wine_data <- function(filepath,
                            sep = ";",
                            dec = ".") {
@@ -19,8 +15,6 @@ load_wine_data <- function(filepath,
 
 
 # Szybka funkcja wyświetlająca strukturę i podsumowanie
-# df: dowolny data.frame
-# Wypisuje strukturę (str) i summary dla szybkiego podglądu danych.
 inspect_data <- function(df) {
   cat("----- STRUKTURA DANYCH -----\n")
   print(str(df))
@@ -30,21 +24,16 @@ inspect_data <- function(df) {
 
 
 # Zliczanie braków (NA) w każdej kolumnie
-# df: data.frame
-# Zwraca wektor liczby braków dla każdej kolumny.
 count_na <- function(df) {
   nas <- sapply(df, function(col) sum(is.na(col)))
   return(nas)
 }
 
-# Prosty podział na zbiór treningowy i testowy
-# df: data.frame z pełnym zestawem danych
-# prop: proporcja danych przeznaczonych do trenowania (np. 0.75)
-# seed: ziarno generatora (dla powtarzalności)
-# Zwraca listę z elementami: $train (data.frame) i $test (data.frame).
+# Opcjonalnie stratyfikowany podział na train/test
 train_test_split <- function(df,
-                             prop = 0.75,
-                             seed = 123) {
+                             prop   = 0.75,
+                             seed   = 123,
+                             strata = NULL) {
   if (!is.data.frame(df)) {
     stop("df musi być data.frame.")
   }
@@ -53,13 +42,25 @@ train_test_split <- function(df,
   }
   set.seed(seed)
   n <- nrow(df)
-  n_train <- floor(prop * n)
-  
-  # losowy wybór indeksów
-  train_idx <- sample(seq_len(n), size = n_train)
-  train_df  <- df[train_idx, , drop = FALSE]
-  test_df   <- df[-train_idx, , drop = FALSE]
-  
+  if (is.null(strata)) {
+    # klasyczny losowy split
+    n_train   <- floor(prop * n)
+    train_idx <- sample(seq_len(n), size = n_train)
+  } else {
+    # stratyfikowany split
+    if (!strata %in% names(df)) {
+      stop(paste0("Brak kolumny strata: ", strata))
+    }
+    # dla każdej grupy losujemy prop*liczba_w_grupie próbek
+    idx_list <- split(seq_len(n), df[[strata]])
+    train_idx <- unlist(lapply(idx_list, function(idxs) {
+      n_i <- length(idxs)
+      k   <- floor(prop * n_i)
+      sample(idxs, size = k)
+    }))
+  }
+  train_df <- df[train_idx, , drop = FALSE]
+  test_df  <- df[-train_idx, , drop = FALSE]
   return(list(train = train_df, test = test_df))
 }
 
@@ -164,4 +165,116 @@ plot_histograms <- function(df, cols, ncol = 2, mar = c(4, 4, 2, 1), oma = c(1, 
          xlab  = col,
          breaks= 20)
   }
+}
+
+# Funkcja pomocnicza: dodaje kolumnę intercept = 1 do regresji
+add_intercept <- function(X) {
+  # X – macierz (lub data.frame) cech
+  intercept <- rep(1, nrow(X))
+  X_int <- cbind(Intercept = intercept, as.matrix(X))
+  return(X_int)
+}
+
+# Funkcja ekstrakcji macierzy X i wektora y
+get_model_data <- function(df_scaled, df_orig, feature_cols, target_col) {
+  X_raw <- df_scaled[, feature_cols, drop = FALSE]
+  X <- add_intercept(X_raw)
+  y <- df_orig[[target_col]]
+  return(list(X = X, y = y))
+}
+
+# Funkcja normal equation
+my_linear_regression_closedform <- function(X, y) {
+  XtX   <- t(X) %*% X
+  XtX_inv <- solve(XtX)
+  theta <- XtX_inv %*% t(X) %*% y
+  return(theta)
+}
+
+# Funkcja predict
+predict_lr <- function(X, theta) {
+  return(as.vector(X %*% theta))
+}
+
+# Funkcja licząca podstawowe metryki regresji
+evaluate_regression <- function(y_true, y_pred) {
+  n <- length(y_true)
+  err <- y_pred - y_true
+  
+  mse <- mean(err^2)
+  rmse <- sqrt(mse)
+  mae <- mean(abs(err))
+  
+  ss_res <- sum(err^2)
+  ss_tot <- sum((y_true - mean(y_true))^2)
+  r2 <- 1 - ss_res/ss_tot
+  
+  return(list(
+    MSE  = mse,
+    RMSE = rmse,
+    MAE  = mae,
+    R2   = r2
+  ))
+}
+
+# Utworzenie klas dla klasyfikatora
+make_classes <- function(y) {
+  factor(
+    ifelse(y >= 7, "dobra", "niedobra"),
+    levels = c("niedobra", "dobra")
+  )
+}
+
+# Macierz pomyłek
+conf_matrix <- function(true, pred) {
+  tbl <- table(True = true, Pred = pred)
+  lv <- levels(true)
+  tbl <- tbl[lv, lv, drop = FALSE]
+  return(tbl)
+}
+
+accuracy <- function(cm) sum(diag(cm)) / sum(cm)
+
+precision <- function(cm) {
+  # TP / (TP + FP)
+  prec <- diag(cm) / colSums(cm)
+  return(prec)
+}
+
+recall<- function(cm) {
+  # TP / (TP + FN)
+  rec <- diag(cm) / rowSums(cm)
+  return(rec)
+}
+
+f1_score<- function(cm) {
+  p <- precision(cm)
+  r <- recall(cm)
+  f <- 2 * p * r / (p + r)
+  return(f)
+}
+
+# Pomocnicza funkcja: zbiera miary z macierzy
+get_metrics <- function(true, pred) {
+  cm  <- conf_matrix(true, pred)
+  acc <- accuracy(cm)
+  prec <- precision(cm)
+  rec <- recall(cm)
+  f1 <- f1_score(cm)
+  
+  # Macro‐średnie
+  macro_prec <- mean(prec, na.rm = TRUE)
+  macro_rec <- mean(rec,  na.rm = TRUE)
+  macro_f1 <- mean(f1,    na.rm = TRUE)
+  
+  return(list(
+    accuracy = acc,
+    precision = prec,
+    recall = rec,
+    f1 = f1,
+    macro_precision = macro_prec,
+    macro_recall = macro_rec,
+    macro_f1 = macro_f1,
+    cm = cm
+  ))
 }

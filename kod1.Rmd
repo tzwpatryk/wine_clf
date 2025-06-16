@@ -19,12 +19,25 @@ print(na_counts)
 ```
 Podział na zbiory treningowy i testowy (75% / 25%)
 ```{r}
-splits <- train_test_split(wine, prop = 0.75, seed = 42)
+# tutaj chwilowo dodajemy klasę (słaba / średnia / wysoka ale usuwamy ją przed regresją)
+wine$quality_class <- make_classes(wine$quality)
+splits <- train_test_split(
+  df = wine,
+  prop = 0.75,
+  seed = 42,
+  strata = "quality_class"
+)
 train_df <- splits$train
-test_df  <- splits$test
+test_df <- splits$test
+
+levels(wine$quality_class)
+table(train_df$quality_class)
+table(test_df$quality_class)
+
+train_df$quality_class <- NULL
+test_df$quality_class  <- NULL
 
 print_split_sizes(splits)
-
 ```
 
 ```{r}
@@ -42,15 +55,239 @@ test_scaled <- apply_scaling(test_df, params = scale_params, method = "standard"
 
 
 ```{r}
-# 1. Statystyki opisowe
+# Statystyki opisowe
 summary(train_df)
 
-# 2. Histogramy wszystkich cech
+# Histogramy wszystkich cech
 plot_histograms(train_df, feature_cols, ncol = 2, mar = c(3, 3, 2, 1), oma = c(1, 1, 1, 1))
 
-# 3. Macierz korelacji + heatmapa
+# Macierz korelacji + heatmapa
 corr_mat <- cor(train_df[, feature_cols])
 heatmap(corr_mat, symm = TRUE, main = "Macierz korelacji cech")
+
+```
+
+```{r}
+feature_cols <- setdiff(names(train_scaled), "quality")
+target_col  <- "quality"
+
+train_data <- get_model_data(train_scaled, train_df, feature_cols, target_col)
+test_data  <- get_model_data(test_scaled,  test_df,  feature_cols, target_col)
+
+# sprawdzenie rozmiarów
+cat("Train:  nrow(X) =", nrow(train_data$X), "  ncol(X) =", ncol(train_data$X), "  length(y) =", length(train_data$y), "\n")
+cat("Test:   nrow(X) =", nrow(test_data$X), "  ncol(X) =", ncol(test_data$X), "  length(y) =", length(test_data$y), "\n")
+```
+
+```{r}
+theta_cf <- my_linear_regression_closedform(train_data$X, train_data$y)
+y_pred_cf_train <- predict_lr(train_data$X, theta_cf)
+y_pred_cf_test  <- predict_lr(test_data$X,  theta_cf)
+
+metrics_cf_train <- evaluate_regression(train_data$y, y_pred_cf_train)
+metrics_cf_test  <- evaluate_regression(test_data$y,  y_pred_cf_test)
+
+print("zbiór treningowy:")
+print(metrics_cf_train)
+print("zbiór testowy:")
+print(metrics_cf_test)
+```
+```{r}
+# install.packages(c("glmnet","rpart","randomForest","e1071","reshape2"))
+library(glmnet)
+library(rpart)
+library(randomForest)
+library(e1071)
+```
+
+```{r}
+# Ridge regression
+x_train <- as.matrix(train_scaled[, feature_cols])
+y_train <- train_data$y
+x_test  <- as.matrix(test_scaled[, feature_cols])
+y_test  <- test_data$y
+
+cv_ridge    <- cv.glmnet(x_train, y_train, alpha = 0)
+best_lambda <- cv_ridge$lambda.min
+ridge_model <- glmnet(x_train, y_train, alpha = 0, lambda = best_lambda)
+
+y_pred_ridge_train <- as.vector(predict(ridge_model, newx = x_train))
+y_pred_ridge_test  <- as.vector(predict(ridge_model, newx = x_test))
+metrics_ridge_train <- evaluate_regression(y_train, y_pred_ridge_train)
+metrics_ridge_test  <- evaluate_regression(y_test,  y_pred_ridge_test)
+
+cat("\n=== Ridge ===\n")
+cat("Best λ:", best_lambda, "\n")
+cat("Train:\n"); print(metrics_ridge_train)
+cat("Test:\n");  print(metrics_ridge_test)
+```
+```{r}
+# Drzewo regresyjne
+tree_model <- rpart(quality ~ ., data = train_scaled, method = "anova")
+y_pred_tree_train <- predict(tree_model, newdata = train_scaled)
+y_pred_tree_test  <- predict(tree_model, newdata = test_scaled)
+metrics_tree_train <- evaluate_regression(train_data$y, y_pred_tree_train)
+metrics_tree_test  <- evaluate_regression(test_data$y,  y_pred_tree_test)
+
+cat("\n=== Drzewo regresyjne ===\n")
+cat("Train:\n"); print(metrics_tree_train)
+cat("Test:\n");  print(metrics_tree_test)
+```
+
+```{r}
+# Random Forest
+set.seed(42)
+rf_model <- randomForest(quality ~ ., data = train_scaled, ntree = 500)
+y_pred_rf_train <- predict(rf_model, newdata = train_scaled)
+y_pred_rf_test  <- predict(rf_model, newdata = test_scaled)
+metrics_rf_train <- evaluate_regression(train_data$y, y_pred_rf_train)
+metrics_rf_test  <- evaluate_regression(test_data$y,  y_pred_rf_test)
+
+cat("\n=== Random Forest ===\n")
+cat("Train:\n"); print(metrics_rf_train)
+cat("Test:\n");  print(metrics_rf_test)
+```
+```{r}
+# Zaokrąglenie prognoz do najbliższej całości
+pred_classes_rf <- round(y_pred_rf_test)
+
+min_q <- min(train_data$y)
+max_q <- max(train_data$y)
+pred_classes_rf[pred_classes_rf < min_q] <- min_q
+pred_classes_rf[pred_classes_rf > max_q] <- max_q
+
+true_classes_rf <- test_data$y
+
+all_levels <- sort(unique(wine$quality))
+true_f <- factor(test_data$y,      levels = all_levels)
+pred_f <- factor(pred_classes_rf,  levels = all_levels)
+
+cm_full <- table(True = true_f, Pred = pred_f)
+print(cm_full)
+
+prop_cm_full <- prop.table(cm_full, margin = 1)
+print(round(prop_cm_full, 2))
+
+library(reshape2)
+library(ggplot2)
+cm_df_full <- melt(cm_full)
+colnames(cm_df_full) <- c("True","Pred","Freq")
+
+ggplot(cm_df_full, aes(x = True, y = Pred, fill = Freq)) +
+  geom_tile(color = "grey80") +
+  geom_text(aes(label = Freq), size = 3) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "Confusion matrix (pełna 7×7) dla RF",
+       x = "Rzeczywista jakość",
+       y = "Zaokrąglona predykcja") +
+  theme_minimal()
+```
+Regresja dała prosperujące wyniki, ale sprawdzimy klasyfikację
+Klasyfikacja
+```{r}
+library(rpart)
+library(randomForest)
+library(e1071)
+```
+
+
+```{r}
+# przygotowanie danych
+train_class <- make_classes(train_data$y)
+test_class <- make_classes(test_data$y)
+
+train_clf_df <- subset(train_scaled, select = -quality)
+train_clf_df$quality_class <- train_class
+
+test_clf_df <- subset(test_scaled, select = -quality)
+test_clf_df$quality_class <- test_class
+
+# budowa modeli
+tree_clf <- rpart(quality_class ~ ., data = train_clf_df, method = "class")
+rf_clf <- randomForest(quality_class ~ ., data = train_clf_df, ntree = 500)
+svm_clf <- svm(quality_class ~ ., data = train_clf_df, type = "C-classification")
+
+# predykcje
+pred_tree <- predict(tree_clf, newdata = test_clf_df, type = "class")
+pred_rf <- predict(rf_clf,   newdata = test_clf_df)
+pred_svm <- predict(svm_clf,  newdata = test_clf_df)
+
+# ewaluacja
+metrics_tree <- get_metrics(test_class, pred_tree)
+metrics_rf <- get_metrics(test_class, pred_rf)
+metrics_svm <- get_metrics(test_class, pred_svm)
+
+# wyświetlenie
+print("=== Drzewo decyzyjne ==="); print(metrics_tree$cm)
+cat("Accuracy: ", metrics_tree$accuracy, "\n")
+cat("Macro‐Precision: ", metrics_tree$macro_precision,"\n")
+cat("Macro‐Recall: ", metrics_tree$macro_recall, "\n")
+cat("Macro‐F1: ",metrics_tree$macro_f1, "\n\n")
+
+print("=== Random Forest ==="); print(metrics_rf$cm)
+cat("Accuracy: ",  metrics_rf$accuracy, "\n")
+cat("Macro‐Precision:",metrics_rf$macro_precision,"\n")
+cat("Macro‐Recall: ",metrics_rf$macro_recall, "\n")
+cat("Macro‐F1: ",metrics_rf$macro_f1, "\n\n")
+
+print("=== SVM ==="); print(metrics_svm$cm)
+cat("Accuracy:", metrics_svm$accuracy, "\n")
+cat("Macro‐Precision: ", metrics_svm$macro_precision, "\n")
+cat("Macro‐Recall: ", metrics_svm$macro_recall, "\n")
+cat("Macro‐F1: ", metrics_svm$macro_f1, "\n")
+```
+
+
+```{r}
+library(caret)
+library(ranger)
+library(MLmetrics)
+
+# poprawiona funkcja metryki F1: musi zwracać named vector
+f1_summary <- function(data, lev = NULL, model = NULL) {
+  f1 <- F1_Score(y_pred = data$pred, y_true = data$obs, positive = "dobra")
+  c(F1 = f1)
+}
+
+# kontroler CV
+ctrl <- trainControl(
+  method = "cv",
+  number = 5,
+  summaryFunction = f1_summary,
+  savePredictions = "final",
+  classProbs = FALSE,
+  verboseIter = TRUE
+)
+
+# siatka RF
+rf_grid <- expand.grid(
+  mtry = c(2, 4, 6, 8),
+  splitrule = "gini",
+  min.node.size = c(1, 5, 10)
+)
+
+set.seed(42)
+rf_tuned <- train(
+  quality_class ~ .,
+  data = train_clf_df,
+  method = "ranger",
+  metric = "F1",
+  tuneGrid = rf_grid,
+  trControl = ctrl,
+  num.trees = 500
+)
+
+print(rf_tuned$bestTune)
+
+# ocena na teście
+pred_test <- predict(rf_tuned, test_clf_df)
+cm <- confusionMatrix(pred_test, test_clf_df$quality_class, positive = "dobra")
+print(cm)
+cat("Test F1 dla 'dobra':",
+    F1_Score(y_pred = pred_test,
+             y_true = test_clf_df$quality_class,
+             positive = "dobra"),
+    "\n")
 
 ```
 
