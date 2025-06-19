@@ -290,4 +290,49 @@ cat("Test F1 dla 'dobra':",
     "\n")
 
 ```
+```{r}
+# regresja liniowa ze spadkiem gradientu 
+
+learning_rate <- 0.01
+iterations <- 1000
+
+gd_model <- gradient_descent_lr(
+  X = train_data$X,
+  y = train_data$y,
+  alpha = learning_rate,
+  n_iters = iterations
+)
+
+theta_gd <- gd_model$theta
+
+y_pred_gd_train <- predict_lr(train_data$X, theta_gd)
+y_pred_gd_test  <- predict_lr(test_data$X,  theta_gd)
+
+metrics_gd_train <- evaluate_regression(train_data$y, y_pred_gd_train)
+metrics_gd_test  <- evaluate_regression(test_data$y,  y_pred_gd_test)
+
+cat("\nRegresja Liniowa (spadek gradientu))\n")
+cat("Train:\n"); print(metrics_gd_train)
+cat("Test:\n");  print(metrics_gd_test)
+
+cat("\nPorównanie metryk na zbiorze testowym:\n")
+cat("R2 (spadek gradientu):", metrics_gd_test$R2, "\n")
+cat("R2 (równanie normalne):", metrics_cf_test$R2, "\n")
+
+library(ggplot2)
+cost_df <- data.frame(
+  Iteration = 1:iterations,
+  Cost = gd_model$cost_history
+)
+
+ggplot(cost_df, aes(x = Iteration, y = Cost)) +
+  geom_line(color = "blue", linewidth = 1) +
+  labs(
+    title = "Krzywa uczenia dla spadku gradientu",
+    subtitle = paste("Współczynnik uczenia (alpha) =", learning_rate),
+    x = "Numer iteracji",
+    y = "Wartość funkcji kosztu (MSE)"
+  ) +
+  theme_minimal()
+```
 

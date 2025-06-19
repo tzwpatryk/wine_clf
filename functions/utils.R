@@ -278,3 +278,39 @@ get_metrics <- function(true, pred) {
     cm = cm
   ))
 }
+
+# regresja liniowa za pomocą spadku gradientu
+
+compute_cost_lr <- function(X, y, theta) {
+  m <- length(y)
+  predictions <- X %*% theta
+  errors <- predictions - y
+  cost <- (1 / (2 * m)) * sum(errors^2)
+  return(cost)
+}
+
+
+gradient_descent_lr <- function(X, y, alpha, n_iters, initial_theta = NULL) {
+  m <- length(y)
+  n_features <- ncol(X)
+
+  if (is.null(initial_theta)) {
+    theta <- rep(0, n_features)
+  } else {
+    theta <- initial_theta
+  }
+
+  cost_history <- numeric(n_iters)
+
+  for (i in 1:n_iters) {
+    errors <- (X %*% theta) - y
+    gradient <- (1 / m) * (t(X) %*% errors)
+    theta <- theta - alpha * gradient
+    cost_history[i] <- compute_cost_lr(X, y, theta)
+  }
+
+  return(list(
+    theta = theta,
+    cost_history = cost_history
+  ))
+}
