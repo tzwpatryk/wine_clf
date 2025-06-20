@@ -335,4 +335,120 @@ ggplot(cost_df, aes(x = Iteration, y = Cost)) +
   ) +
   theme_minimal()
 ```
+Martyna Dudek part 2 kodu :(
 
+```{r}
+
+# Wykres ważności cech z Random Forest
+importance_vals <- as.data.frame(rf_model$importance)
+importance_df <- data.frame(
+  Feature = rownames(importance_vals),
+  Importance = importance_vals[["%IncMSE"]]
+)
+
+library(ggplot2)
+ggplot(importance_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Ważność cech w Random Forest",
+    x = "Cechy", y = "% Wzrost MSE po permutacji"
+  ) +
+  theme_minimal()
+
+
+```
+
+```{r}
+# Rzeczywiste vs przewidywane (closed form regression)
+df_pred_vs_true <- data.frame(
+  True = test_data$y,
+  Predicted = y_pred_cf_test
+)
+
+ggplot(df_pred_vs_true, aes(x = True, y = Predicted)) +
+  geom_point(alpha = 0.5, color = "darkgreen") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Rzeczywiste vs Przewidywane (Regresja liniowa)",
+       x = "Rzeczywiste",
+       y = "Przewidywane") +
+  theme_minimal()
+
+```
+
+```{r}
+ggplot(wine, aes(x = factor(quality), y = alcohol)) +
+  geom_boxplot(fill = "lightblue") +
+  labs(title = "Rozkład alkoholu względem jakości wina",
+       x = "Jakość (ocena)",
+       y = "Zawartość alkoholu") +
+  theme_minimal()
+
+```
+
+```{r}
+# Dane bez etykiet jakości
+kmeans_data <- train_scaled[, feature_cols]
+
+wss <- sapply(1:10, function(k){
+  kmeans(kmeans_data, centers = k, nstart = 10)$tot.withinss
+})
+
+plot(1:10, wss, type = "b", pch = 19,
+     xlab = "Liczba klastrów K",
+     ylab = "Suma kwadratów wewnątrzklastrowych",
+     main = "Dobór liczby klastrów")
+
+set.seed(42)
+kmeans_model <- kmeans(kmeans_data, centers = 3, nstart = 25)
+
+# Dodanie informacji o klastrze do danych
+train_scaled$cluster <- as.factor(kmeans_model$cluster)
+
+library(ggplot2)
+
+# Średnia jakość wina w każdym klastrze
+agg_quality <- aggregate(train_df$quality, by = list(Cluster = train_scaled$cluster), FUN = mean)
+colnames(agg_quality)[2] <- "Średnia_jakość"
+
+print(agg_quality)
+
+# Wykres jakości w klastrach
+ggplot(train_df, aes(x = train_scaled$cluster, y = quality)) +
+  geom_boxplot(fill = "lightgreen") +
+  labs(title = "Rozkład jakości wina w klastrach (k-means)",
+       x = "Klaster",
+       y = "Ocena jakości") +
+  theme_minimal()
+
+
+
+```
+```{r}
+# Redukcja wymiarowości do 2D
+pca_res <- prcomp(kmeans_data, center = TRUE, scale. = TRUE)
+pca_df <- data.frame(pca_res$x[, 1:2])
+pca_df$cluster <- train_scaled$cluster
+
+ggplot(pca_df, aes(x = PC1, y = PC2, color = cluster)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Wizualizacja klastrów (PCA + k-means)",
+       x = "PC1", y = "PC2") +
+  theme_minimal()
+
+```
+
+
+```{r}
+library(pROC)
+
+# Przygotuj prawdopodobieństwa klasy "dobra"
+rf_probs <- predict(rf_clf, newdata = test_clf_df, type = "prob")
+roc_obj <- roc(response = test_clf_df$quality_class,
+               predictor = rf_probs[, "dobra"],
+               levels = rev(levels(test_clf_df$quality_class)))
+
+plot(roc_obj, col = "blue", main = "Krzywa ROC dla Random Forest")
+auc(roc_obj)
+
+```
