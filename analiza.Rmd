@@ -19,7 +19,7 @@ print(na_counts)
 ```
 Podział na zbiory treningowy i testowy (75% / 25%)
 ```{r}
-# tutaj chwilowo dodajemy klasę (słaba / średnia / wysoka ale usuwamy ją przed regresją)
+# tutaj chwilowo dodajemy klasę (dobra / niedobra ale usuwamy ją przed regresją)
 wine$quality_class <- make_classes(wine$quality)
 splits <- train_test_split(
   df = wine,
@@ -99,6 +99,51 @@ library(rpart)
 library(randomForest)
 library(e1071)
 ```
+```{r}
+# regresja liniowa ze spadkiem gradientu 
+
+learning_rate <- 0.01
+iterations <- 1000
+
+gd_model <- gradient_descent_lr(
+  X = train_data$X,
+  y = train_data$y,
+  alpha = learning_rate,
+  n_iters = iterations
+)
+
+theta_gd <- gd_model$theta
+
+y_pred_gd_train <- predict_lr(train_data$X, theta_gd)
+y_pred_gd_test  <- predict_lr(test_data$X,  theta_gd)
+
+metrics_gd_train <- evaluate_regression(train_data$y, y_pred_gd_train)
+metrics_gd_test  <- evaluate_regression(test_data$y,  y_pred_gd_test)
+
+cat("\nRegresja Liniowa (spadek gradientu))\n")
+cat("Train:\n"); print(metrics_gd_train)
+cat("Test:\n");  print(metrics_gd_test)
+
+cat("\nPorównanie metryk na zbiorze testowym:\n")
+cat("R2 (spadek gradientu):", metrics_gd_test$R2, "\n")
+cat("R2 (równanie normalne):", metrics_cf_test$R2, "\n")
+
+library(ggplot2)
+cost_df <- data.frame(
+  Iteration = 1:iterations,
+  Cost = gd_model$cost_history
+)
+
+ggplot(cost_df, aes(x = Iteration, y = Cost)) +
+  geom_line(color = "blue", linewidth = 1) +
+  labs(
+    title = "Krzywa uczenia dla spadku gradientu",
+    subtitle = paste("Współczynnik uczenia (alpha) =", learning_rate),
+    x = "Numer iteracji",
+    y = "Wartość funkcji kosztu (MSE)"
+  ) +
+  theme_minimal()
+```
 
 ```{r}
 # Ridge regression
@@ -137,7 +182,7 @@ cat("Test:\n");  print(metrics_tree_test)
 ```{r}
 # Random Forest
 set.seed(42)
-rf_model <- randomForest(quality ~ ., data = train_scaled, ntree = 500)
+rf_model <- randomForest(quality ~ ., data = train_scaled, ntree = 500, importance = TRUE,)
 y_pred_rf_train <- predict(rf_model, newdata = train_scaled)
 y_pred_rf_test  <- predict(rf_model, newdata = test_scaled)
 metrics_rf_train <- evaluate_regression(train_data$y, y_pred_rf_train)
@@ -236,14 +281,13 @@ cat("Macro‐Precision: ", metrics_svm$macro_precision, "\n")
 cat("Macro‐Recall: ", metrics_svm$macro_recall, "\n")
 cat("Macro‐F1: ", metrics_svm$macro_f1, "\n")
 ```
-
+Ze względu na najlepsze wyniki dotrenowujemy RandomForest
 
 ```{r}
 library(caret)
 library(ranger)
 library(MLmetrics)
 
-# poprawiona funkcja metryki F1: musi zwracać named vector
 f1_summary <- function(data, lev = NULL, model = NULL) {
   f1 <- F1_Score(y_pred = data$pred, y_true = data$obs, positive = "dobra")
   c(F1 = f1)
@@ -259,7 +303,7 @@ ctrl <- trainControl(
   verboseIter = TRUE
 )
 
-# siatka RF
+# siatka
 rf_grid <- expand.grid(
   mtry = c(2, 4, 6, 8),
   splitrule = "gini",
@@ -290,56 +334,10 @@ cat("Test F1 dla 'dobra':",
     "\n")
 
 ```
-```{r}
-# regresja liniowa ze spadkiem gradientu 
-
-learning_rate <- 0.01
-iterations <- 1000
-
-gd_model <- gradient_descent_lr(
-  X = train_data$X,
-  y = train_data$y,
-  alpha = learning_rate,
-  n_iters = iterations
-)
-
-theta_gd <- gd_model$theta
-
-y_pred_gd_train <- predict_lr(train_data$X, theta_gd)
-y_pred_gd_test  <- predict_lr(test_data$X,  theta_gd)
-
-metrics_gd_train <- evaluate_regression(train_data$y, y_pred_gd_train)
-metrics_gd_test  <- evaluate_regression(test_data$y,  y_pred_gd_test)
-
-cat("\nRegresja Liniowa (spadek gradientu))\n")
-cat("Train:\n"); print(metrics_gd_train)
-cat("Test:\n");  print(metrics_gd_test)
-
-cat("\nPorównanie metryk na zbiorze testowym:\n")
-cat("R2 (spadek gradientu):", metrics_gd_test$R2, "\n")
-cat("R2 (równanie normalne):", metrics_cf_test$R2, "\n")
-
-library(ggplot2)
-cost_df <- data.frame(
-  Iteration = 1:iterations,
-  Cost = gd_model$cost_history
-)
-
-ggplot(cost_df, aes(x = Iteration, y = Cost)) +
-  geom_line(color = "blue", linewidth = 1) +
-  labs(
-    title = "Krzywa uczenia dla spadku gradientu",
-    subtitle = paste("Współczynnik uczenia (alpha) =", learning_rate),
-    x = "Numer iteracji",
-    y = "Wartość funkcji kosztu (MSE)"
-  ) +
-  theme_minimal()
-```
-Martyna Dudek part 2 kodu :(
 
 ```{r}
 
-# Wykres ważności cech z Random Forest
+# Wykres ważności cech z regresora Random Forest
 importance_vals <- as.data.frame(rf_model$importance)
 importance_df <- data.frame(
   Feature = rownames(importance_vals),
@@ -442,7 +440,6 @@ ggplot(pca_df, aes(x = PC1, y = PC2, color = cluster)) +
 ```{r}
 library(pROC)
 
-# Przygotuj prawdopodobieństwa klasy "dobra"
 rf_probs <- predict(rf_clf, newdata = test_clf_df, type = "prob")
 roc_obj <- roc(response = test_clf_df$quality_class,
                predictor = rf_probs[, "dobra"],
